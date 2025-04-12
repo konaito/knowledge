@@ -1,103 +1,81 @@
-# Supabase Remote スキーマを Local Migrations に反映する方法
+# Supabase Remote スキーマを Local Migrations に反映する方法（2025年 CLI 対応）
 
 ## 📖 背景
 
-Supabase では、本来「**マイグレーションファイル（`migrations/`）を正とし、ローカルからスキーマを管理する**」という方針が推奨されています。  
-しかし、現実には以下のようなケースが発生します：
+Supabase では「マイグレーションファイルを正」としてローカルからスキーマを管理するのが基本方針です。  
+しかし現実には以下のようなケースが発生します：
 
-- クラウド上（Supabase Studio や SQL Editor）でスキーマ変更を直接行ってしまった
-- チームメンバーの中に Supabase CLI を使わず、Studio 上だけで開発している人がいる
-- 本番環境のスキーマ変更をローカル環境にも適用したい
+- Studio 上で直接テーブル・カラムを変更してしまった
+- Supabase CLI を使っていない開発者と連携したい
 
-そのような状況で、**Remote の状態をローカルのマイグレーションファイルとして再構成**する方法を説明します。
+これらの場合、**Remote の状態をマイグレーションとして復元する方法**として `supabase db pull` が有効です。
 
 ---
 
-## 🧭 手順概要
+## 🚀 やることはこれだけ！
 
 ```bash
-# ① Remote（本番）のスキーマを取得
 supabase db pull
-
-# ② ローカルDBをmigrationsから再構築
-supabase db reset
-
-# ③ Remoteとの差分をmigrationファイルとして保存
-supabase db diff --file supabase/migrations/20250412_remote_changes.sql
 ```
 
----
+このコマンドを実行することで：
 
-## 🔍 各コマンドの意味と役割
-
-### 1. `supabase db pull`
-- **Remote のスキーマを取得**して、`supabase/schema.sql` に保存
-- これはマイグレーションではなく **「現在のスナップショット」**
-
-### 2. `supabase db reset`
-- ローカル DB をリセットし、**`migrations/` にあるすべてのファイルを適用**
-- これにより「**マイグレーションベースの理想の状態**」をローカルに再現
-
-### 3. `supabase db diff`
-- `schema.sql`（Remote の状態）と reset 済みローカル DB の差分を比較
-- **差分だけを含む migration ファイル**を生成
+- Remote の現在のスキーマが `supabase/migrations/` 以下に `yyyymmdd_timestamp_remote_schema.sql` 形式で出力されます。
+- `schema_migrations` テーブルの履歴も自動で修復されます（CLI により `Repaired migration history:` が表示されます）。
 
 ---
 
-## 💡 ユースケース別の活用方法
+## 🧠 どういうときに使う？
 
-### ✅ ユースケース1: クラウドでうっかり直接変更してしまった
+### ✅ ユースケース1: 本番をうっかり直接いじってしまった！
 
-**問題点**：
-- Studio で直接テーブルやカラムを追加・変更したが、それをローカルに反映していない  
-- `migrations/` に変更履歴が存在しないため、チームでの再現性が失われる
+- Studio 上で直接テーブルやカラムを追加
+- だがローカル `migrations/` には記録されていない
 
-**解決策**：
-- `supabase db pull` で現在の状態を取得し、
-- `supabase db reset` + `supabase db diff` により、**失われたマイグレーションを生成**
+→ `supabase db pull` を実行すれば、**差分がマイグレーションとして復元され、git 管理可能に**
 
 ---
 
-### ✅ ユースケース2: Supabase CLI を使っていない開発者との連携
+### ✅ ユースケース2: Supabase CLI を使っていない人との連携
 
-**問題点**：
-- 一部のメンバーは Supabase Studio のみを使って開発しており、`migrations/` を管理していない
-- スキーマの一貫性や Git による追跡が困難
+- チームの一部が Studio だけで開発している
+- CLI 派と Studio 派でスキーマの一貫性がない
 
-**解決策**：
-- 共同作業の後に `supabase db pull` で最新のスキーマを取得し、
-- チームリーダーなどが `db reset` → `db diff` を行い、**統一されたマイグレーションファイルを生成して Git に追加**
-- 以降、**migrations ベースでの開発に統一**していくための橋渡しに
+→ リーダーが `supabase db pull` を使って remote を取り込み、**統一されたマイグレーション履歴を生成**
 
 ---
 
-## 📁 参考ディレクトリ構成例
+## 📁 ファイル構成の例
 
-```
+```bash
 supabase/
 ├── migrations/
-│   ├── 20240301_init.sql
-│   ├── 20240401_add_users.sql
-│   └── 20250412_remote_changes.sql  ←★ 今回生成される差分
-├── schema.sql                       ← pull で取得されるRemoteのスナップショット
+│   ├── 20250412023324_remote_schema.sql  # ← supabase db pull により生成
 ├── config.toml
 ```
 
----
-
-## 🛑 注意事項
-
-- `supabase db pull` では **マイグレーションファイルは生成されません**
-- `schema.sql` を直接編集しないでください（破損の原因になります）
-- 差分の内容はレビューしてから Git にコミットすることを推奨します
-- `supabase db reset` はローカルDBを初期化します。実行前に必要に応じてバックアップを取りましょう
+> 補足：`auth` や `storage` スキーマは除外されています。必要に応じて以下を実行：
+>
+> ```bash
+> supabase db pull --schema auth,storage
+> ```
 
 ---
 
-## ✨ まとめ
+## ⚠️ 注意点
 
-| 操作                        | 目的                                 |
-|-----------------------------|--------------------------------------|
-| `supabase db pull`         | Remote の状態を取得（schema.sql）     |
-| `supabase db reset`        | ローカルDBを `migrations/` から再構築 |
-| `supabase db diff`         | Remote との差分を新たな migration に変換 |
+- `supabase db pull` は **Remote の現在の状態をそのまま migrations として取り込みます**  
+  → Studio 上でのすべての変更が反映されます
+- CLI のバージョンによって動作が異なるため、**最新の CLI（v1.0 以上）を推奨**
+- `supabase db reset` や `diff` は、特別な理由がない限り不要です（例：差分のみ抽出したい場合など）
+
+---
+
+## ✅ 結論
+
+| 操作 | 意味 |
+|------|------|
+| `supabase db pull` | Remote の状態をマイグレーションとして復元 |
+| → git commit | 以後の開発・本番反映が再現可能に |
+
+Studio 操作も安全にバージョン管理できるようになりました ✨
